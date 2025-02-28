@@ -1,0 +1,24 @@
+{% extends '.layout.html' %}
+
+{% block title %} {% endblock %}
+
+{% block main %}
+
+<section class="w-full min-h-screen py-24">
+    <section class="md:w-2/4 w-full mx-auto px-2">
+        <a href="/" class="text-sm mb-2"><i class="fa-solid fa-arrow-left mr-2"></i> Back to homepage</a>
+        <h1 class="text-xl mb-5">{{ info.title }}</h1>
+        <img src="{{ info.thumbnail }}" alt="Thumbnail" class="w-full h-auto rounded-lg mb-5">
+        <div class="mb-5">
+            <p class="text-sm mb-1"><strong>Duration:</strong> {{ info.duration }} seconds</p>
+            <p class="text-sm mb-1"><strong>Views:</strong> {{ info.view_count }}</p>
+            <p class="text-sm mb-1"><strong>Description:</strong> {{ info.description }}</p>
+        </div>
+        <div class="flex">
+            <a class="px-4 py-2 bg-red-500 text-white rounded-lg mr-2" href="{{ url_for('download', video_id=info.id, download_type='video') }}">Download Video (MP4)</a>
+            <a class="px-4 py-2 bg-red-500 text-white rounded-lg" href="{{ url_for('download', video_id=info.id, download_type='audio') }}">Download Audio</a>
+        </div>
+    </section>
+</section>
+
+{% endblock %}
