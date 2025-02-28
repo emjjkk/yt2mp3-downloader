@@ -1,56 +1,109 @@
 from flask import Flask, render_template, request, redirect, url_for, send_file
-import pafy
+from youtubesearchpython import VideosSearch
+import yt_dlp
 import os
 
 app = Flask(__name__)
 
-DOWNLOAD_FOLDER = 'downloads'
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+def download_with_yt_dlp(url, download_type):
+    """
+    Downloads a YouTube video or audio using yt-dlp.
+    download_type: 'video' or 'audio'
+    Returns the downloaded filename.
+    """
+    if download_type == 'video':
+        # Force a progressive format: one that has both video and audio,
+        # so merging is not needed (and ffmpeg is not required).
+        ydl_opts = {
+            'format': 'best[ext=mp4][vcodec!=none][acodec!=none]',
+            'outtmpl': '%(id)s.%(ext)s'
+        }
+    elif download_type == 'audio':
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': '%(id)s.%(ext)s',
+            # Optionally, you can add a postprocessor here to convert the audio format.
+        }
+    else:
+        raise ValueError("Invalid download type specified.")
 
-@app.route('/', methods=['GET', 'POST'])
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        filename = ydl.prepare_filename(info)
+    return filename
+
+def get_video_info(url):
+    """
+    Extracts video information without downloading using yt-dlp.
+    """
+    ydl_opts = {
+        'quiet': True,
+        'skip_download': True,
+        'no_warnings': True
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    return info
+
+# -------------------------------------------------------------------
+# Route: Home page – a single form for either a URL or a search term.
+@app.route('/')
 def index():
-    download_links = {}
-    if request.method == 'POST':
-        url = request.form.get('url')
-        try:
-            video = pafy.new(url)
-            best_audio = video.getbestaudio()
-            best_video = video.getbest()
-            
-            download_links = {
-                'title': video.title,
-                'mp3': url_for('download', url=url, format='mp3'),
-                'mp4': url_for('download', url=url, format='mp4')
-            }
-        except Exception as e:
-            return f"Error: {e}"
-    
-    return render_template('index.html', download_links=download_links)
+    return render_template('index.html')
 
-@app.route('/download')
-def download():
-    url = request.args.get('url')
-    format_type = request.args.get('format')
-
-    if not url or not format_type:
+# -------------------------------------------------------------------
+# Route: Process the input from the home page.
+@app.route('/process', methods=['POST'])
+def process():
+    user_input = request.form.get('query')
+    if not user_input:
         return redirect(url_for('index'))
+    
+    # If the input starts with "http://" or "https://", treat it as a URL.
+    if user_input.startswith("http://") or user_input.startswith("https://"):
+        return redirect(url_for('video', url=user_input))
+    else:
+        # Otherwise, treat the input as a search term.
+        videos_search = VideosSearch(user_input, limit=10)
+        results = videos_search.result()['result']
+        return render_template('results.html', results=results)
 
+# -------------------------------------------------------------------
+# Route: Video page that shows details and download links.
+@app.route('/video')
+def video():
+    video_url = request.args.get('url')
+    if not video_url:
+        return redirect(url_for('index'))
     try:
-        video = pafy.new(url)
-        if format_type == 'mp3':
-            best_audio = video.getbestaudio()
-            filename = os.path.join(DOWNLOAD_FOLDER, f"{video.title}.mp3")
-            best_audio.download(filepath=filename)
-        elif format_type == 'mp4':
-            best_video = video.getbest()
-            filename = os.path.join(DOWNLOAD_FOLDER, f"{video.title}.mp4")
-            best_video.download(filepath=filename)
-        else:
-            return "Invalid format"
-
-        return send_file(filename, as_attachment=True)
+        info = get_video_info(video_url)
     except Exception as e:
-        return f"Error: {e}"
+        return f"Error retrieving video info: {e}", 500
+    return render_template('video.html', info=info)
+
+# -------------------------------------------------------------------
+# Download route: Downloads video or audio.
+@app.route('/download/<video_id>/<download_type>')
+def download(video_id, download_type):
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+    try:
+        filename = download_with_yt_dlp(video_url, download_type)
+    except Exception as e:
+        return f"Download error: {e}", 500
+
+    if not os.path.exists(filename):
+        return "Downloaded file not found.", 404
+
+    return send_file(filename, as_attachment=True, download_name=os.path.basename(filename))
+
+# -------------------------------------------------------------------
+# Optional cleanup route to remove downloaded files.
+@app.route('/cleanup')
+def cleanup():
+    for file in os.listdir('.'):
+        if file.endswith('.mp4') or file.endswith('.webm') or file.endswith('.m4a'):
+            os.remove(file)
+    return "Cleaned up downloaded files."
 
 if __name__ == '__main__':
     app.run(debug=True)
